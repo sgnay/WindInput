@@ -27,6 +27,18 @@
 
 ---
 
+## 2026-11-02 · 方案级每页候选数 `[candidate] per_page`（0.130）
+
+- 合入：869e0c0d；范围：所有方案的主输入路径分页（翻页、数字键选词、展开网格行宽）
+- 变化：方案文件或 `schema_overrides/{id}.toml` 的 `[candidate]` 写 `per_page = N` 后，该方案作为活跃方案时每页 N 条，
+  切走即回到全局 `ui.candidate.per_page`。例：全局 7，五笔声明 `per_page = 5` → 五笔每页 5 条、拼音仍 7 条。
+  临拼 / 快捷等 overlay 模式：`per_page_extended > 0` 不受影响；`= 0` 时跟随五笔生效的 5。
+  值须为不小于 1 的整数，写错（0 / 负数 / 非整数）整条忽略并出现在方案降级提示里，不会变成 7。
+- 触发条件：方案显式声明才生效；出厂方案均不声明，默认行为不变
+- 回退旧行为：删除方案里的 `per_page` 行
+- 钉住的测试：`wind-coordinator/tests/schema_ui_fold.rs`；`wind-config` 的 `candidate_generic_*`、`scheme_fold_read_gates`
+- 来源：内部（通用折叠机制的首个使用者，见 `docs/design/schema-scoped-behavior.md` §3.4）
+
 ## 2026-11-01 · `$SS`/`$AA` 全码有重码时不自动展开；`$SS` 支持内嵌 `$CC` 成员（0.130）
 
 - 合入：待合并；范围：码表 / 拼音 / 混输主输入路径（临拼、临英、特殊模式等 overlay 暂不变）
@@ -46,6 +58,17 @@
 - 钉住的测试：`wind-coordinator/tests/group_expansion_rule.rs`；
   `wind-phrase` 的 `test_cmdbar_array_embedded_command_members`、`dict_value_group_carries_command_members`
 - 来源：内部
+
+## 2026-10-31 · 简拼整长匹配之后逐级补短前缀词组与首声母单字（0.129）
+- 合入：待合入；范围：拼音方案、纯简拼 / 混合简拼
+- 变化：`tymh` 前：只有「头也没回」1 条 → 后：「头也没回」之后依次是 `tym`/`ty` 词组（他也没、同样、体验…），最后是首声母单字（他、它、她…）。`bxzd` 前：只有 4 字词 → 后：4 字词之后补「不想知」「必须」等前缀词组，再补「被、吧、把…」。整长匹配仍在最前，首选不变。
+- 条数：三字及以上切点每层最多 50 条、两字切点 20 条（内部配置 `AbbrevFallbackConfig`，参考微软拼音不限、豆包 3 字不限 / 2 字 8 条）；首声母单字不设小限额，同直接打首字母；两个字母的简拼（`zd`）也补首声母单字。
+- 触发条件：出厂即生效；输入须有「成不了音节的字母」（纯全拼不受影响）。首声母单字只在整串是纯简拼形态时补（`buxzd` 首音节已打全，不补 `b` 的单字）。
+- 混输：表现不变。简拼出厂关（`schema.mix.enable_pinyin_abbrev`）；开启后码长内的部分候选仍被 `pinyin_partial_candidates` 过滤，回退只在超码长时可见。
+- 实现注记：回退补的首声母单字不吃裸声母单字提权、权重置 0，否则候选上限收紧（约 290）时词组会先被截掉。
+- 回退旧行为：`[schema.pinyin.abbrev] enabled = false` 关简拼；仅回退本条无配置，属设计变更
+- 钉住的测试：`wind-engine/tests/pinyin_abbrev_short_fallback.rs`
+- 来源：论坛 t371（A2-100）；对照微软拼音「整长匹配 → 词组 → 单字」
 
 ## 2026-10-24 · 拼音误读表：召回读错的词并提示正确拼音（0.128）
 
