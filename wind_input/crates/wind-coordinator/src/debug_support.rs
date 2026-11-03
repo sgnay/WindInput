@@ -300,6 +300,27 @@ impl Coordinator {
         &self.softkeyboard
     }
 
+    /// 翻转「仅本次候选窗」的注释态（测试/诊断用）：直通 [`Self::toggle_comment_session`]。
+    pub fn debug_toggle_comment_session(&self) {
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        self.toggle_comment_session(&mut s);
+    }
+
+    /// 改注释持久态并写回（测试/诊断用）：直通 [`Self::set_comment_state`]。
+    pub fn debug_set_comment_state(
+        &self,
+        to: wind_config::comment_lib::CommentState,
+    ) -> anyhow::Result<()> {
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        self.set_comment_state(&mut s, to)
+    }
+
+    /// 当前生效的注释态（测试/诊断用）：直通 [`Self::effective_comment_state`]。
+    pub fn debug_effective_comment_state(&self) -> wind_config::comment_lib::CommentState {
+        let s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        Self::effective_comment_state(&self.rt().config, &s)
+    }
+
     /// 走一次菜单命令分派（测试用），与右键菜单点选是同一个入口。
     ///
     /// 存在理由：会写盘的菜单项（如「密码框强制英文」）要在重定向了用户目录的独立测试
@@ -347,6 +368,25 @@ impl Coordinator {
             .candidates
             .iter()
             .map(|c| (c.text.clone(), c.code.clone(), c.comment.clone()))
+            .collect()
+    }
+
+    /// 全部候选的 `(text, is_command, is_group, phrase_template)`（测试/诊断用）。
+    /// `$SS`/`$AA` 展开态与命令成员的断言要看这几位，`debug_all_candidate_texts` 看不到。
+    pub fn debug_candidate_shapes(&self) -> Vec<(String, bool, bool, String)> {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .candidates
+            .iter()
+            .map(|c| {
+                (
+                    c.text.clone(),
+                    c.is_command,
+                    c.is_group,
+                    c.phrase_template.clone(),
+                )
+            })
             .collect()
     }
 

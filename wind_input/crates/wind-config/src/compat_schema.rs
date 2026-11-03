@@ -82,6 +82,7 @@ const SMART_METHODS: &[&str] = &["delete_replace", "hold_composition"];
 const CANDIDATE_POSITION_MODES: &[&str] = &["follow_caret", "fixed"];
 const NEWLINE_STYLES: &[&str] = &["keep", "cr", "lf", "crlf"];
 const PLACEHOLDER_CHARS: &[&str] = &["space", "zwsp", "blank"];
+const SYLLABLE_SEPARATORS: &[&str] = &["apostrophe", "space", "dot", "none"];
 const MULTILINE_COMMITS: &[&str] = &["commit", "paste"];
 
 /// 全部字段。顺序即界面内的展示顺序（同组内）。
@@ -310,6 +311,21 @@ pub static COMPAT_FIELDS: &[FieldMeta] = &[
     // ── 输入行为 ──────────────────────────────────────────────────
     FieldMeta {
         section: "apps",
+        key: "syllable_separator",
+        kind: Kind::Enum,
+        group: "behavior",
+        label: "拼音音节分隔符",
+        summary: "拼音编码里音节之间显示的符号：单引号 '、空格、间隔号 · 或不显示。",
+        problem: "有的软件（如 Unreal Engine 的资产命名框）不接受单引号，编码里带 ' 会被拒绝或弹错。\
+                  选「不显示」即可，只改显示，不影响输入和切分。不设置则跟随全局设置。",
+        hosts: &[],
+        options: SYLLABLE_SEPARATORS,
+        depends_on: None,
+        protocol: false,
+        advanced: false,
+    },
+    FieldMeta {
+        section: "apps",
         key: "auto_pair",
         kind: Kind::TriBool,
         group: "behavior",
@@ -408,12 +424,13 @@ pub static COMPAT_FIELDS: &[FieldMeta] = &[
         group: "host",
         label: "宿主渲染模式",
         summary: "候选窗由输入法服务绘制，再交给软件内的组件显示。",
-        problem: "Win11 开始菜单、任务栏搜索这类受限进程，普通候选窗盖不住它们的窗口层级。改由服务渲染后经共享内存转交，\
+        problem: "Win11 开始菜单、任务栏搜索、表情面板这类受限进程，普通候选窗盖不住它们的窗口层级。改由服务渲染后经共享内存转交，\
                   才能正常显示。",
         hosts: &[
             "SearchHost.exe",
             "searchapp.exe",
             "startmenuexperiencehost.exe",
+            "textinputhost.exe",
         ],
         options: &[],
         depends_on: None,
@@ -559,6 +576,9 @@ pub const OPTION_LABELS: &[(&str, &str)] = &[
     ("space", "空格"),
     ("zwsp", "零宽空格"),
     ("blank", "盲文空白（有宽度、不算空格）"),
+    ("apostrophe", "单引号 ( ' )"),
+    ("dot", "间隔号 ( · )"),
+    ("none", "不显示"),
     ("commit", "直接上屏"),
     ("paste", "粘贴上屏"),
 ];

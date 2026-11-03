@@ -850,6 +850,53 @@ void WindEngine::sendKeyUp(fcitx::InputContext* ic, uint32_t vk, uint32_t mods, 
     }
 }
 
+bool WindEngine::sendAltEvent(fcitx::InputContext* ic, uint32_t vk, uint8_t eventType, uint32_t mods,
+                              uint8_t toggles)
+{
+    if (!ensureConnected()) {
+        return false;
+    }
+    KeyEvent e;
+    e.keyCode = vk;
+    e.modifiers = mods;
+    e.eventType = eventType;
+    e.toggles = toggles;
+    e.eventSeq = ++keySeq_;
+    e.prevChar = prevCharFor(ic);
+    Frame resp;
+    if (!requestWithRetry(encodeKeyEventFrame(e), resp)) {
+        return false;
+    }
+    bool consumed = applyResponse(ic, resp, false);
+    WIND_DEBUG() << "comment_alt vk=" << hex(vk) << (eventType == KEY_EVENT_DOWN ? " down" : " up")
+                 << " mods=" << hex(mods) << (consumed ? " 吃" : " 透传");
+    return consumed;
+}
+
+void WindEngine::sendCtrlRaw(fcitx::InputContext* ic, uint32_t vk, uint8_t eventType, uint32_t mods,
+                             uint8_t toggles)
+{
+    if (!ensureConnected()) {
+        return;
+    }
+    if (eventType == KEY_EVENT_MOD_UP) {
+        sendCaretUpdate(ic); // 判出单击可能切中英：状态气泡锚到当前插入点，同 sendKeyUp
+    }
+    KeyEvent e;
+    e.keyCode = vk;
+    e.modifiers = mods;
+    e.eventType = eventType;
+    e.toggles = toggles;
+    e.eventSeq = ++keySeq_;
+    e.prevChar = prevCharFor(ic);
+    Frame resp;
+    if (requestWithRetry(encodeKeyEventFrame(e), resp)) {
+        applyResponse(ic, resp, false);
+    }
+    WIND_DEBUG() << "ctrl_raw vk=" << hex(vk) << (eventType == KEY_EVENT_MOD_DOWN ? " down" : " up")
+                 << " mods=" << hex(mods) << " toggles=" << hex(toggles);
+}
+
 void WindEngine::activate(const fcitx::InputMethodEntry&, fcitx::InputContextEvent& event)
 {
     fcitx::InputContext* ic = event.inputContext();
@@ -871,6 +918,8 @@ void WindEngine::activate(const fcitx::InputMethodEntry&, fcitx::InputContextEve
     // 光标前字符的记账只对「这一个文本框里我们自己打出去的东西」有效，换焦点即作废。
     router_.reset();
     tap_.reset();
+    altHold_.reset();
+    ctrlRaw_.reset();
     caps_.reset();
     eatenKeys_.clear();
     if (!ensureConnected()) {
@@ -902,6 +951,13 @@ void WindEngine::deactivate(const fcitx::InputMethodEntry&, fcitx::InputContextE
     focusUnreported_ = false; // 焦点都走了，不再补报（下次 activate 自会再报）
     // 按住的键先抬起，发给当初按下的那个 IC（通常就是正在失焦的这个）。
     releaseHeldKeys("focus_out");
+    // 按住中的 Ctrl 松开多半送不到本引擎：补报 NOT_TAP 的 MOD_UP，修饰键记账一并复位
+    // （activate 才复位的话，失焦到下次激活之间残留的记账会把同侧 Ctrl 当成连发吞掉）。
+    if (uint32_t rvk = ctrlRaw_.takeHeld(); rvk != 0 && bridge_.isConnected()) {
+        sendCtrlRaw(ic, rvk, KEY_EVENT_MOD_UP, KEYMOD_CTRL, TOGGLE_MOD_NOT_TAP);
+    }
+    tap_.reset();
+    altHold_.reset();
     // 失焦 / 切走输入法：菜单随之收起（服务端也会在 FocusLost 上关，但它有 250ms 的「刚打开」
     // 守卫；本端这条无条件，且先于 FocusLost 报，服务端据此复位）。
     panel_->closeMenu("focus_out");
@@ -966,6 +1022,7 @@ void WindEngine::keyEvent(const fcitx::InputMethodEntry&, fcitx::KeyEvent& event
         // （带 STATUS_CAPS_LOCK 与「A」标签）。键本身两个方向都交还宿主。
         if (!event.isRelease()) {
             tap_.onPress(sym, nowMs()); // Shift 按住时按 CapsLock：那次 Shift 不再是单击
+            ctrlRaw_.onPress(sym, false);
         } else if (caps && ensureConnected()) {
             uint8_t toggles = statesToToggles(states) & ~TOGGLE_CAPSLOCK;
             sendKeyUp(ic, keysymToVK(sym), statesToModifiers(states),
@@ -975,6 +1032,25 @@ void WindEngine::keyEvent(const fcitx::InputMethodEntry&, fcitx::KeyEvent& event
     }
 
     if (event.isRelease()) {
+        // 组字中的 Alt 松开：转发给服务，回包 Consumed 才吃（否则宿主照常看到，如激活菜单栏）。
+        if (uint32_t avk = altVK(sym); avk != 0) {
+            const bool forward =
+                altHold_.shouldForwardUp(altInputSession(router_.hasComposition(), candidatesVisible_));
+            const uint32_t mods = statesToModifiers(states) | altHold_.stickyMods();
+            altHold_.reset();
+            if (forward && sendAltEvent(ic, avk, KEY_EVENT_UP, mods, statesToToggles(states))) {
+                event.filterAndAccept();
+            }
+            return;
+        }
+        // 候选显示时如实上报的那次 Ctrl 按住：报松开，不再按旧路的单击上报（一次按住只走一条路）。
+        bool notTap = false;
+        if (uint32_t rvk = ctrlRaw_.onRelease(sym, &notTap); rvk != 0) {
+            tap_.onRelease(sym, nowMs());
+            const uint8_t toggles = statesToToggles(states) | (notTap ? TOGGLE_MOD_NOT_TAP : 0);
+            sendCtrlRaw(ic, rvk, KEY_EVENT_MOD_UP, statesToModifiers(states) | KEYMOD_CTRL, toggles);
+            return;
+        }
         if (uint32_t vk = tap_.onRelease(sym, nowMs()); vk != 0) {
             // 干净的修饰键单击：切中英等。松开事件本身照常交给宿主（宿主要看得见修饰键）。
             if (ensureConnected()) {
@@ -983,6 +1059,10 @@ void WindEngine::keyEvent(const fcitx::InputMethodEntry&, fcitx::KeyEvent& event
             return;
         }
         if (eatenKeys_.erase(code) > 0) {
+            // 吃掉过按下的功能键（F1–F12）：松开也报给服务端，按住档的注释切换键靠它收起详细态。
+            if (uint32_t fvk = keysymToVK(sym); fvk >= 0x70 && fvk <= 0x7B && ensureConnected()) {
+                sendKeyUp(ic, fvk, statesToModifiers(states), statesToToggles(states));
+            }
             event.filterAndAccept();
         }
         return;
@@ -992,6 +1072,24 @@ void WindEngine::keyEvent(const fcitx::InputMethodEntry&, fcitx::KeyEvent& event
     // 菜单开着时按键由服务端转给菜单（方向键 / 回车 / Esc / 其它键关菜单并吞掉）：
     // 键盘操作同样算菜单上的活动，空闲计时重新起算。
     panel_->noteMenuActivity();
+    // 组字中的 Alt 按下：转发给服务切换注释态，回包 Consumed 才吃。按住期间按过的
+    // Shift / Ctrl / Super 粘到 Alt 事件的修饰位上（见 AltHold）。
+    altHold_.noteKey(sym, states);
+    // 候选显示时 Ctrl 的按下如实上报（单击由服务端判，见 CtrlRaw）；键本身照常交还宿主。
+    if (uint32_t rvk = ctrlRaw_.onPress(sym, altInputSession(router_.hasComposition(), candidatesVisible_));
+        rvk != 0) {
+        sendCtrlRaw(ic, rvk, KEY_EVENT_MOD_DOWN, statesToModifiers(states) | KEYMOD_CTRL, statesToToggles(states));
+        return;
+    }
+    if (uint32_t avk = altVK(sym); avk != 0) {
+        const bool forward = altInputSession(router_.hasComposition(), candidatesVisible_);
+        altHold_.onAltDown(forward);
+        if (forward && sendAltEvent(ic, avk, KEY_EVENT_DOWN, statesToModifiers(states) | altHold_.stickyMods(),
+                                    statesToToggles(states))) {
+            event.filterAndAccept();
+        }
+        return;
+    }
     // 修饰键本身的按下不上报（Windows 吃掉切换键的 keydown、macOS 走 flagsChanged 不发）：
     // 单击判定在上面，组合键的修饰状态随下一个键的 states 一起到。
     if (key.isModifier()) {
@@ -1161,6 +1259,7 @@ void WindEngine::onRenderFrame(const HostRenderFramePayload& p)
         hideCandidate();
         return;
     }
+    candidatesVisible_ = true;
     if (!shm_.isOpen() && !shm_.open(shmName())) {
         WIND_WARN() << "打不开候选窗共享内存 " << shmName() << "：" << shm_.lastError();
         return;
@@ -1199,6 +1298,7 @@ void WindEngine::hideAllWayland()
 
 void WindEngine::hideCandidate()
 {
+    candidatesVisible_ = false;
     panel_->hide();
 #ifdef WIND_HAVE_WAYLAND
     if (wlPanel_) {

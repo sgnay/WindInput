@@ -27,6 +27,26 @@
 
 ---
 
+## 2026-11-01 · `$SS`/`$AA` 全码有重码时不自动展开；`$SS` 支持内嵌 `$CC` 成员（0.130）
+
+- 合入：待合并；范围：码表 / 拼音 / 混输主输入路径（临拼、临英、特殊模式等 overlay 暂不变）
+- 变化：
+  - 全码匹配且同码**还有别的候选**（码表词、别的短语、另一个组）：前 → 组成员全部炸开，
+    挤满候选页；后 → 折成一条组名候选（`is_group`），选中后才展开，且只列该组成员。
+    例：`uu` 既是 `$SS("括号", …)` 又有码表词「乙」，现在候选是「乙 / 括号」。
+  - 全码匹配且**无重码**：仍自动展开（不变）；前缀匹配：仍折成组名（不变）。
+  - `$SS("组", "文本", $CC("显示名", 动作...))`：嵌入的 `$CC` 成员此前在候选里被静默丢弃，
+    现在出为独立命令候选，选中只执行该成员的动作链。词库文件与短语库两条通路都生效。
+  - 命令候选按「显示名 + 动作」去重，不再被同名普通候选吞掉。
+  - 重码折叠下选中组进入展开态后，Backspace 先退回折叠视图（输入码不变），再按才删码；
+    无重码、重查仍自动展开时不吞键，照常删码。Esc 不变（取消整个输入）。仅主路径。
+    开关 `input.cmdbar.backspace_collapse_group`（默认 true，false = Backspace 直接删码）。
+- 触发条件：出厂即生效
+- 回退旧行为：无（设计变更）
+- 钉住的测试：`wind-coordinator/tests/group_expansion_rule.rs`；
+  `wind-phrase` 的 `test_cmdbar_array_embedded_command_members`、`dict_value_group_carries_command_members`
+- 来源：内部
+
 ## 2026-10-24 · 拼音误读表：召回读错的词并提示正确拼音（0.128）
 
 - 合入：feat/pinyin-correction、feat/misread-table-only；范围：全拼、双拼、混输的拼音侧、临时拼音
@@ -108,3 +128,24 @@
 - 钉住的测试：`wind-engine/tests/english_merge_policy.rs`、
   `wind-coordinator/tests/codetable_english_position.rs`、`wind-engine/tests/engine_manager.rs`（否决）
 - 来源：维护者实测（短码不出英文）、论坛 t355
+
+## 2026-10-30 · 码表行内通配：并查未启用扩展词库并标 `*`（0.129）
+
+- 合入：WindInput（本提交）；范围：开启通配的码表方案、混输主码表
+- 变化：行内通配（如 `uui?`）此前不看未启用的扩展词库，现在与反查模式一致（命令栏剪贴板反查 `dict.rev` 同样补查，码前带 `*`）：前追加这些命中
+  （排在已启用之后，如「门头沟区」）。反查与行内通配里，未启用库命中的注释前加 `*`。
+- 触发条件：需开 `input.reverse.lookup_disabled_dicts`（出厂关）；普通打字候选不受影响。
+- 回退旧行为：关掉该开关。
+- 钉住的测试：`wind-engine/tests/lookup_disabled_dicts.rs`、`wind-coordinator/tests/codetable_wildcard.rs`、
+  `codetable_reverse.rs`
+- 来源：维护者定（论坛 t348 / t361）
+
+## 2026-10-30 · 混输下符号通配键首位作通配（0.129）
+
+- 合入：WindInput `0c3caf8e`；范围：开启通配的五笔拼音混输方案
+- 变化：通配键是符号（如 `?`、`/`、反引号）时，首位按它不再直接上屏标点，而是进缓冲作通配；
+  字母通配键（`z`）首位仍按拼音。
+- 触发条件：`schema.codetable.wildcard` 开且通配键为符号（出厂通配关、键为 `z`）。
+- 回退旧行为：把通配键换回字母，或关闭通配。
+- 钉住的测试：`wind-coordinator/tests/wildcard_symbol_lead.rs`
+- 来源：维护者实测

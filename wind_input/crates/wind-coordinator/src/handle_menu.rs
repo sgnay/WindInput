@@ -1500,7 +1500,7 @@ impl Coordinator {
         }
     }
 
-    /// 菜单「词库管理」：直接落到当前正在用的方案域，而不是默认的快捷短语域。
+    /// 菜单「词库管理」：直接落到当前正在用的方案域，而不是默认的命令短语域。
     /// 用户从输入法菜单进词库，十有八九是要管当前这套方案的词。
     /// 方案 id 取不到时退化为不带参数，行为与从前一致。
     pub(crate) fn open_dictionary(&self) {
@@ -3209,7 +3209,9 @@ impl Coordinator {
 pub(crate) fn candidate_is_group_member(cand: &wind_candidate::Candidate) -> bool {
     cand.is_phrase
         && !cand.is_group
-        && (cand.phrase_template.starts_with("$SS") || cand.phrase_template.starts_with("$AA"))
+        && (cand.is_group_member
+            || cand.phrase_template.starts_with("$SS")
+            || cand.phrase_template.starts_with("$AA"))
 }
 
 /// 右键「删除」菜单项的动态文案与可用性（按候选来源，对齐 Go computeDeleteMenuLabel）：
