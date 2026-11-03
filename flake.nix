@@ -28,8 +28,8 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          windinput-data = pkgs.callPackage ./nix/data.nix { inherit version; };
-          windinput-service = pkgs.callPackage ./nix/service.nix {
+          windinput-data = pkgs.callPackage ./wind_linux/nix/data.nix { inherit version; };
+          windinput-service = pkgs.callPackage ./wind_linux/nix/service.nix {
             inherit version;
             # 服务启动日志里的 `git:<rev>`；沙箱里没有 .git，只能由这里给（unknown 表示
             # 从非 flake 路径构建，例如 `nix build path:.#…`）。
@@ -40,18 +40,18 @@
             sourceDateEpoch = self.lastModified or 315532800;
             data = windinput-data;
           };
-          wind-setting = pkgs.callPackage ./nix/setting.nix {
+          wind-setting = pkgs.callPackage ./wind_linux/nix/setting.nix {
             inherit version;
             windInputSrc = self;
             windSettingSrc = self.inputs.wind-setting;
             windUiRustSrc = self.inputs.wind-ui-rust;
           };
-          windinput-fcitx5 = pkgs.callPackage ./nix/addon.nix {
+          windinput-fcitx5 = pkgs.callPackage ./wind_linux/nix/addon.nix {
             inherit version;
             service = windinput-service;
             setting = wind-setting;
           };
-          windinput = pkgs.callPackage ./nix/package.nix {
+          windinput = pkgs.callPackage ./wind_linux/nix/package.nix {
             inherit
               version
               windinput-service
@@ -74,7 +74,7 @@
 
       devShells = nixpkgs.lib.genAttrs systems (
         system: {
-          default = (import nixpkgs { inherit system; }).callPackage ./nix/devshell.nix { };
+          default = (import nixpkgs { inherit system; }).callPackage ./wind_linux/nix/devshell.nix { };
         }
       );
     };

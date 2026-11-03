@@ -30,7 +30,7 @@
   version,
 }:
 let
-  root = ../.;
+  root = ../..;
 in
 stdenv.mkDerivation {
   pname = "windinput-fcitx5";
@@ -45,15 +45,21 @@ stdenv.mkDerivation {
         keep =
           prefix: rel == prefix || lib.hasPrefix "${prefix}/" rel || lib.hasPrefix "${rel}/" prefix;
       in
-      rel == "" || lib.any keep [
-        "wind_linux"
-        "wind_tsf/include"
-        "wind_input/crates/wind-ipc/src"
-        "wind_input/crates/wind-bridge/src"
-        "wind_input/crates/wind-ui/src"
-        "wind_input/crates/wind-keys/src"
-        "wind_macos/Sources/WindInputApp/UI"
-      ];
+      # wind_linux/nix/ 是打包模块本身：动它不该重编 addon（其余 wind_linux/ 仍进输入）。
+      rel == ""
+      || (
+        lib.any keep [
+          "wind_linux"
+          "wind_tsf/include"
+          "wind_input/crates/wind-ipc/src"
+          "wind_input/crates/wind-bridge/src"
+          "wind_input/crates/wind-ui/src"
+          "wind_input/crates/wind-keys/src"
+          "wind_macos/Sources/WindInputApp/UI"
+        ]
+        && rel != "wind_linux/nix"
+        && !lib.hasPrefix "wind_linux/nix/" rel
+      );
   };
 
   nativeBuildInputs = [

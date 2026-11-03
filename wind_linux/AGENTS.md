@@ -44,7 +44,7 @@ Fcitx5 的 `InputContext`。引擎/词库/候选逻辑全在服务里，这里**
 
 addon 的版本写进 `share/fcitx5/addon/windinput.conf` 的 `Version=`，来源是第三个 cache 选项
 `WIND_ADDON_VERSION`（空 = 工程版本 `project(... VERSION ...)`；两条打包链都注入
-`docs/VERSION`：`nix/addon.nix` 与 `scripts/linux/build-deb.sh` 各传一次）。改它不用动源码里
+`docs/VERSION`：`wind_linux/nix/addon.nix` 与 `scripts/linux/build-deb.sh` 各传一次）。改它不用动源码里
 的默认值——不传就落回 `0.1.0`，fcitx5 输入法列表里显示的版本与产品版本脱钩。
 
 ## 构建 / 测试
@@ -71,6 +71,11 @@ addon 目标的依赖（`WIND_BUILD_ADDON=ON`，默认）：Fcitx5Core / Fcitx5U
 单测只读源码树（`WIND_REPO_DIR` / `WIND_PROTOCOL_RS` 编译定义），写入一律落在 `TMPDIR` 下的
 临时目录，不读 `build_dev/`——因此能在只读源码树（Nix sandbox）里直接跑（`nix build` 的
 `checkPhase` 就是这么用的）。
+
+设置程序（独立仓 `../wind-setting`）同样能原生 Linux 构建：它依赖的 `windui` 支持
+Windows / macOS / Linux（X11）三个平台（`windui` 的 `platform/mod.rs` 只对其它目标
+`compile_error!`），`wind_linux/nix/setting.nix` 已实测把它编成 Nix 包
+（`packages.wind-setting`，见 `wind_linux/nix/AGENTS.md`）。
 
 `e2e.sh` 的做法（改它之前先读脚本头注释）：`dbus-run-session` 起私有会话总线；服务二进制拷进
 临时目录、`data` 下逐项软链到 `build_dev/data`（`system.phrases.toml` 例外：取仓库 `data/` 那份再追加

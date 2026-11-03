@@ -51,17 +51,19 @@ rustPlatform.buildRustPackage {
   # 以 workspace 根为 src：cargo 的 setup hook 只在源码根找 Cargo.lock。
   # 只剔 `target/`（见 `src-filter.nix`）：`path:` 源下本机 cargo 产物否则会成为派生输入，
   # 每轮构建都换一个 store 路径并级联重建四层。
-  src = srcFilter.withoutBuildOutput ../wind_input;
-  cargoLock.lockFile = ../wind_input/Cargo.lock;
+  src = srcFilter.withoutBuildOutput ../../wind_input;
+  cargoLock.lockFile = ../../wind_input/Cargo.lock;
 
-  # 三处编译期读取仓库根，源码树只带 wind_input/ 时补到构建根：
+  # 四处编译期读取仓库根，源码树只带 wind_input/ 时补到构建根：
   #   - apps/service/build.rs：../../..//docs/VERSION（产品版本）
   #   - crates/wind-coordinator/build.rs：同一份 docs/VERSION（「关于」菜单）
   #   - wind-theme：include_str!("../../../../data/themes/_base/theme.toml")
+  #   - wind-config/comment_lib.rs：include_str!("../../../../data/system.comments.toml")
   postPatch = ''
     mkdir -p "$NIX_BUILD_TOP/docs" "$NIX_BUILD_TOP/data/themes/_base"
     printf '%s\n' '${version}' > "$NIX_BUILD_TOP/docs/VERSION"
-    cp ${../data/themes/_base/theme.toml} "$NIX_BUILD_TOP/data/themes/_base/theme.toml"
+    cp ${../../data/themes/_base/theme.toml} "$NIX_BUILD_TOP/data/themes/_base/theme.toml"
+    cp ${../../data/system.comments.toml} "$NIX_BUILD_TOP/data/system.comments.toml"
   '';
 
   # 只构建服务二进制；linux-host 关掉桌面渲染路径（外部宿主 = Fcitx5 addon）。

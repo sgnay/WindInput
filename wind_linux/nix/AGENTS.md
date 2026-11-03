@@ -1,13 +1,13 @@
-# nix/ —— Linux 端的 Nix 打包
+# wind_linux/nix/ —— Linux 端的 Nix 打包
 
 `flake.nix` + 本目录把 Linux（Fcitx5）形态打成可复现的 Nix 包。用户视角的用法与产出见
-[docs/design/nix-packaging.md](../docs/design/nix-packaging.md)；这里只记**改这些文件前必须知道的约定**。
+[docs/design/nix-packaging.md](../../docs/design/nix-packaging.md)；这里只记**改这些文件前必须知道的约定**。
 
 ## 文件职责
 
 | 文件 | 职责 |
 |---|---|
-| `../flake.nix` | 输出 `packages.{windinput,windinput-service,windinput-fcitx5,windinput-data,wind-setting}` 与 `devShells.default`；版本直接读 `docs/VERSION` |
+| `../../flake.nix` | 输出 `packages.{windinput,windinput-service,windinput-fcitx5,windinput-data,wind-setting}` 与 `devShells.default`；版本直接读 `docs/VERSION` |
 | `data.nix` | 词库数据（等价于 `dev.sh` 的 gen-data + assemble_data）：上游 FOD + 生成工具 + 组装断言 |
 | `service.nix` | Rust 服务；装成 `$out/lib/windinput/{wind_input,data}`，另在 `$out/bin/wind_input` 放一条相对软链（`meta.mainProgram` 的程序入口） |
 | `addon.nix` | Fcitx5 addon（C++/CMake）+ 14 个单测；版本经 `WIND_ADDON_VERSION` 注入 |
@@ -15,7 +15,7 @@
 | `package.nix` | 汇总包 + 桌面入口 / MIME + 许可证（`share/licenses/windinput/`） |
 | `devshell.nix` | cargo / cmake / fcitx5 头文件 / xcb / wayland / gio |
 | `src-filter.nix` | 派生输入的构建产物过滤：把 `target/` 从 `src` 副本里剔掉（service / tools / 设置程序共用） |
-| `strip-*.awk` | 从 `scripts/dev.sh` 平移的 rime-frost 裁剪逻辑（改一边要同步另一边） |
+| `../../scripts/lib/strip-*.awk` | rime-frost 裁剪逻辑：与 `scripts/dev.sh` **共用同一份**，这里只引用 |
 
 ## 立约级不变量（违反即静默故障）
 
@@ -61,10 +61,11 @@
 - **`cargoRoot` 在本版 nixpkgs 的 cargo hook 里不生效**：cargo 的 setup hook 只在源码根找
   `Cargo.lock`。服务因此以 `wind_input/` 为 `src`；设置程序把 `wind-setting/Cargo.lock`
   复制到三仓布局根，再 `preBuild = "cd wind-setting"`。
-- **三处编译期读仓库根**：`apps/service/build.rs` 与 `crates/wind-coordinator/build.rs` 各读一次
+- **四处编译期读仓库根**：`apps/service/build.rs` 与 `crates/wind-coordinator/build.rs` 各读一次
   `docs/VERSION`（后者供「关于」菜单）、`wind-theme` 用 `include_str!` 读
-  `data/themes/_base/theme.toml`。`service.nix` 的 `postPatch` 在 `$NIX_BUILD_TOP` 补齐这两份
-  文件（`docs/VERSION` 两处 build.rs 共用）；加新的跨目录 `include_str!` 时要同步补。
+  `data/themes/_base/theme.toml`、`wind-config/comment_lib.rs` 读 `data/system.comments.toml`。
+  `service.nix` 的 `postPatch` 在 `$NIX_BUILD_TOP` 补齐这三份文件（`docs/VERSION` 两处 build.rs
+  共用）；加新的跨目录 `include_str!` 时要同步补。
 - **设置程序也编译期读主仓**：`wind-setting/src/xdg_assoc.rs` 用 `include_str!` 内嵌
   `scripts/linux/pkg/windinput-{setting,import}.desktop` 与 `windinput-mime.xml`。
   `setting.nix` 因此把该目录按原相对位置（`WindInput/scripts/linux/pkg/`）拷进兄弟布局——
@@ -73,6 +74,11 @@
   （`package.nix` 的 `postBuild`）。与 `scripts/pack-installer.sh` 给安装包装的 `licenses/`
   是同一份口径：Nix 包不参与那条产物链，得自己带上，否则拿到手的人看不到上游声明。
   rime-emoji 的 LGPL 正文不走这里——它随 `data/emoji/` 由 `data.nix` 分发。
+
+- **中英释义注释词库必须留在 data 构建里**：`data.nix` 第 9 步跑 `scripts/comment_dicts/build.py`
+  （只依赖 Python 标准库），读 `data/comments-src/` 与本次生成的英文/拼音/五笔词表，所以必须排在
+  这些词库之后；产物进 `schemas/comments/{en_zh,zh_en}.txt`，源目录用完 `rm -rf`，不随包分发。
+  脚本或 `comments-src` 缺了会在断言里直接失败——dev 链只 warn，别照抄成「静默跳过」。
 
 ## 维护
 
@@ -86,6 +92,19 @@
 - 只查输出不构建：`nix flake show` / `nix eval .#packages.x86_64-linux --apply builtins.attrNames`。
 - `nix flake check` 默认只查当前 system；要连 aarch64 一起求值用 `--all-systems`
   （会额外构建/求值 devShell，慢）。
+
+本套打包**不在 CI 里**（`release.yml` / `linux-build.yml` 只出 Windows 安装包与 deb），
+改动后必须本地跑上面那条验收基线。改下表左侧的文件时，连带确认右侧的 Nix 侧没有回归：
+
+| 改动位置 | 受影响的 Nix 侧 |
+|---|---|
+| `docs/VERSION` | 全部包的版本：`flake.nix` 读它，再注入 `WIND_ADDON_VERSION` / `WIND_APP_VERSION` / `gen_dict --version-date` |
+| `wind_linux/CMakeLists.txt` 的 `WIND_SERVICE_PATH` / `WIND_SETTING_PATH` / `WIND_ADDON_VERSION` | `addon.nix` 的 `-D` 注入与 `checkPhase` 断言（deb 链共用这三个选项） |
+| `wind_input/apps/service/build.rs` 的 `SOURCE_DATE_EPOCH` / `WIND_GIT_HASH_OVERRIDE` | `service.nix` 的 `env.*`；动了先跑 `nix build --rebuild path:.#windinput-service` |
+| `scripts/lib/strip-*.awk` | `data.nix` 直接引用同一份（`dev.sh` 也用），改规则两边一起生效 |
+| `scripts/comment_dicts/build.py` / `data/comments-src/` | `data.nix` 第 9 步；词表参数随 dev.sh 的同一步，改 CLI 要三边同步 |
+| `data.nix` 的 `src` 白名单 | 新增「构建期 / 单测从仓库读的文件」要补进去，漏了只在这条链上失败 |
+| 邻仓 `wind-setting` / `wind-ui-rust` | `setting.nix` 的三仓布局与 `Cargo.lock` 放置；升级走 `nix flake update` |
 
 ## 已知不在本包范围
 

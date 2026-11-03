@@ -1,8 +1,9 @@
 # 词库数据目录（等价于 scripts/dev.sh 的 gen-data + assemble_data）。
 #
 # 输入：
-#   - 本仓 data/（方案、主题、配置等源文件）+ scripts/lib/gen-compat.sh（生成 Linux 版
-#     compat.toml）+ wind_input/apps/wind-tools/data/（gen_dict 的配置目录）
+#   - 本仓 data/（方案、主题、配置与注释词库源文件）+ scripts/lib/gen-compat.sh（生成 Linux 版
+#     compat.toml）+ scripts/comment_dicts/build.py（中英释义注释词库，第 9 步）
+#     + wind_input/apps/wind-tools/data/（gen_dict 的配置目录）
 #   - 上游词库源：固定 commit 的 FOD（见 upstream），只取构建真正用到的文件
 #   - wind-tools 的生成工具：gen_dict / gen_opencc / gen_pinyin / gen_unigram / gen_aux_code
 #
@@ -15,21 +16,22 @@
   rustPlatform,
   curl,
   cacert,
+  python3,
   version,
 }:
 let
   # 派生输入只留真正被读到的三处。整仓当 src 时，改任何一个文件（哪怕 README.md）都会改掉
   # 本派生的输入哈希，级联重建 data → service → fcitx5 → 汇总包四层：
-  #   data/                             入库的方案 / 主题 / 配置（buildPhase 第 1 步整份复制）
-  #   scripts/lib/gen-compat.sh         生成 Linux 版 compat.toml（第 9 步）
+  #   data/                             入库的方案 / 主题 / 配置 / 注释词库源（第 1 步整份复制）
+  #   scripts/lib/gen-compat.sh         生成 Linux 版 compat.toml（第 10 步）
+  #   scripts/comment_dicts/build.py    中英释义注释词库（第 9 步；只读 data/comments-src/）
   #   wind_input/apps/wind-tools/data/  gen_dict 的配置目录：custom_*.txt / boost_words.txt
-  #                                     都相对它解析（gen_dict/config.rs::resolve_paths）
   #   wind_input/data/                  dev.sh 里「存在就合并」的可选源（第 1b 段）
   # ⚠ wind_input/ 的其它改动仍会经下面的 tools 派生重建数据（gen_* 链接 workspace crate）；
   #   这里切断的是 data/、文档、wind_linux/ 等无关文件的耦合。
   # tools 派生要整棵 wind_input/（cargo workspace），但用 `src-filter.nix` 剔掉 `target/`：
   # 本机 cargo 产物不是源码，进派生输入会让 `path:` 下每轮构建都换一个哈希。
-  root = ../.;
+  root = ../..;
   src = lib.cleanSourceWith {
     name = "windinput-data-context";
     src = root;
@@ -43,11 +45,12 @@ let
       rel == "" || lib.any keep [
         "data"
         "scripts/lib/gen-compat.sh"
+        "scripts/comment_dicts"
         "wind_input/apps/wind-tools/data"
         "wind_input/data"          # 第 1b 段合并 settings（当前无此目录，留着防静默缺失）
       ];
   };
-  ws = ../wind_input;
+  ws = ../../wind_input;
   srcFilter = import ./src-filter.nix { inherit lib; };
 
   # ── 上游词库源 ──────────────────────────────────────────────────────────
@@ -167,7 +170,7 @@ let
     # 只剔 `target/`（见 `src-filter.nix`）：本机 cargo 产物不是源码，进派生输入会让
     # `path:` 下每轮构建都换 store 路径，级联重建四层。
     src = srcFilter.withoutBuildOutput ws;
-    cargoLock.lockFile = ../wind_input/Cargo.lock;
+    cargoLock.lockFile = ../../wind_input/Cargo.lock;
     cargoBuildFlags = [ "-p" "wind-tools" ];
     doCheck = false;
 
@@ -187,7 +190,10 @@ stdenv.mkDerivation {
   pname = "windinput-data";
   inherit version src;
 
-  nativeBuildInputs = [ tools ];
+  nativeBuildInputs = [
+    tools
+    python3
+  ];
 
   # 这些生成物不入库：缺了 gen-data 时安装器会发残包，故在构建期直接断言关键文件。
   buildPhase = ''
@@ -234,7 +240,7 @@ stdenv.mkDerivation {
     for f in ${lib.concatStringsSep " " frostCells}; do
       cp -f "$cache/rime-frost/cn_dicts_cell/$f.dict.yaml" "$pinyin/ext/"
     done
-    awk -v dir="$pinyin" -f ${./strip-unshipped-imports.awk} \
+    awk -v dir="$pinyin" -f ${../../scripts/lib/strip-unshipped-imports.awk} \
       "$pinyin/rime_frost.dict.yaml" > "$pinyin/rime_frost.dict.yaml.tmp"
     mv -f "$pinyin/rime_frost.dict.yaml.tmp" "$pinyin/rime_frost.dict.yaml"
 
@@ -280,15 +286,36 @@ stdenv.mkDerivation {
 
     # 8b. rime-frost 的 emoji / 符号表
     cp -f "$cache/rime-frost/opencc/emoji.txt" "$data/emoji/frost_emoji.txt"
-    awk -v excl="著名表演艺术家" -f ${./strip-frost-sections.awk} \
+    awk -v excl="著名表演艺术家" -f ${../../scripts/lib/strip-frost-sections.awk} \
       "$cache/rime-frost/opencc/others.txt" > "$data/emoji/frost_others.txt"
 
-    # 9. Linux 版应用兼容规则（Windows 规则不能随包带）
+    # 9. 中英释义注释词库（scripts/comment_dicts/build.py，与 dev.sh 的第 9 步同一件事）。
+    #    只读入库的 data/comments-src/（第 1 步随 data/ 复制进来）与本次生成的词表，故必须排在
+    #    拼音 / 英文 / 五笔之后；产物入 schemas/comments/，源目录用完剥掉、不随包分发。
+    #    脚本只用 Python 标准库；缺 python3 或生成失败由下面的断言拦下（dev 侧只 warn）。
+    mkdir -p "$data/schemas/comments"
+    cdict=${src}/scripts/comment_dicts/build.py
+    pmap_args=()
+    [ -f "$data/pinyin_map.txt" ] && pmap_args=(--pinyin "$data/pinyin_map.txt")
+    python3 -I "$cdict" en-zh \
+      --raw "$data/comments-src/en_zh_ecdict_raw.tsv" \
+      --words "$data/schemas/english/en.dict.yaml" "$data/schemas/english/en_ext.dict.yaml" \
+      --refined "$data/comments-src/en_zh_refined.tsv" \
+      --out "$data/schemas/comments/en_zh.txt"
+    python3 -I "$cdict" zh-en \
+      --raw "$data/comments-src/zh_en_cedict_raw.tsv" --ai "$data/comments-src/zh_en_ai.tsv" \
+      --refined "$data/comments-src/zh_en_cedict_refined.tsv" "''${pmap_args[@]}" \
+      --words "$data/schemas/pinyin/cn_dicts/base.dict.yaml" "$data/schemas/pinyin/cn_dicts/ext.dict.yaml" \
+              "$data/schemas/pinyin/ext/idiom.dict.yaml" "$data/schemas/wubi86/wubi86_jidian.dict.yaml" \
+      --out "$data/schemas/comments/zh_en.txt"
+    rm -rf "$data/comments-src"
+
+    # 10. Linux 版应用兼容规则（Windows 规则不能随包带）
     bash ${src}/scripts/lib/gen-compat.sh linux \
       "$data/compat.toml" "$data/compat.toml.linux"
     mv -f "$data/compat.toml.linux" "$data/compat.toml"
 
-    # 10. 发布级断言：关键运行时数据缺失即失败，不产出残缺数据目录
+    # 11. 发布级断言：关键运行时数据缺失即失败，不产出残缺数据目录
     for f in \
       "$data/pinyin_map.txt" \
       "$data/schemas/pinyin/cn_dicts/base.dict.yaml" \
@@ -297,10 +324,13 @@ stdenv.mkDerivation {
       "$data/schemas/stroke/stroke.dict.yaml" \
       "$data/opencc/STCharacters.octrie" \
       "$data/emoji/emoji_word.txt" \
-      "$data/emoji/LICENSE"
+      "$data/emoji/LICENSE" \
+      "$data/schemas/comments/en_zh.txt" \
+      "$data/schemas/comments/zh_en.txt"
     do
       [ -s "$f" ] || { echo "数据组装不完整：缺 $f" >&2; exit 1; }
     done
+    [ ! -d "$data/comments-src" ] || { echo "comments-src 不该随包分发" >&2; exit 1; }
 
     runHook postBuild
   '';

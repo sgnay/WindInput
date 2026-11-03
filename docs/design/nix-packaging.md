@@ -1,6 +1,6 @@
 # Linux 端的 Nix 打包
 
-本仓自带 `flake.nix` + `nix/`，把 Linux（Fcitx5）形态的清风输入法打成可复现的 Nix 包：
+本仓库根自带 `flake.nix`，`wind_linux/nix/` 是它的模块目录：把 Linux（Fcitx5）形态的清风输入法打成可复现的 Nix 包：
 Rust 服务 + Fcitx5 addon + 图形设置程序 + 词库数据。Windows / macOS 形态不在 Nix 覆盖范围内
 （前者要原生 MSVC 工具链，后者要 Xcode / IMKit）。
 
@@ -35,12 +35,12 @@ Rust 服务 + Fcitx5 addon + 图形设置程序 + 词库数据。Windows / macOS
 
 addon 侧的服务 / 设置程序默认路径是源码里的 `#ifndef` 宏。`wind_linux/CMakeLists.txt` 因此提供
 `WIND_SERVICE_PATH` / `WIND_SETTING_PATH` 两个 cache 选项（空 = 用源码内置的 `/usr/lib/...`），
-由 `nix/addon.nix` 注入 store 路径；编译定义是 `PUBLIC`，单测读同一个值。
+由 `wind_linux/nix/addon.nix` 注入 store 路径；编译定义是 `PUBLIC`，单测读同一个值。
 运行时仍可用 `WIND_INPUT_SERVICE` / `WIND_INPUT_SETTING` 覆盖。
 
 ## 词库数据流水线
 
-等价于 `scripts/dev.sh` 的 `gen-data` + `assemble_data`（`nix/data.nix`）：
+等价于 `scripts/dev.sh` 的 `gen-data` + `assemble_data`（`wind_linux/nix/data.nix`）：
 
 1. **上游源**：8 个 GitHub 仓库（rime-frost、pinyin-data、OpenCC、rime-wubi86-jidian、
    rime-lua-aux-code、rime-stroke、rime-emoji、hanzi-chars）按 **commit 钉版本**，
@@ -49,32 +49,33 @@ addon 侧的服务 / 设置程序默认路径是源码里的 `#ifndef` 宏。`wi
 2. **生成工具**：`wind-tools` 的 `gen_unigram` / `gen_pinyin` / `gen_opencc` / `gen_dict` /
    `gen_aux_code`，作为独立派生构建后进 `PATH`。
 3. **组装**：复制入库的 `data/`、（目录存在时）合并 `wind_input/data/settings/`、裁剪 rime-frost 的
-   `import_tables`（`nix/strip-unshipped-imports.awk`）、过滤 rime-frost 分组
-   （`nix/strip-frost-sections.awk`）、跑 `gen-compat.sh linux` 换掉 Windows 版兼容规则，
-   最后断言关键文件非空（`pinyin_map.txt`、五笔主/扩展库、`stroke.dict.yaml`、
-   `STCharacters.octrie`、emoji 表与 LICENSE）。
+   `import_tables`（`scripts/lib/strip-unshipped-imports.awk`）、过滤 rime-frost 分组
+   （`scripts/lib/strip-frost-sections.awk`）、用 `scripts/comment_dicts/build.py` 生成中英释义
+   （`schemas/comments/`，源数据 `data/comments-src/` 用完剥掉）、跑 `gen-compat.sh linux`
+   换掉 Windows 版兼容规则，最后断言关键文件非空（`pinyin_map.txt`、五笔主/扩展库、
+   `stroke.dict.yaml`、`STCharacters.octrie`、emoji 表与 LICENSE、`schemas/comments/*.txt`）。
 
 > `gen_dict` 的默认配置路径是编译期的 `CARGO_MANIFEST_DIR`，在 Nix 构建里不存在，
 > 因此显式传 `--config wind_input/apps/wind-tools/data/gen_dict/gen_dict.toml`。
 
-派生输入（`src`）按 `cleanSourceWith` 收窄到真正被读到的子树：`nix/data.nix` 只留 `data/`、
-`scripts/lib/gen-compat.sh`、`wind_input/apps/wind-tools/data/`、`wind_input/data/`（第 3 步的
-`settings/` 源，当前仓库没有该目录，白名单先留着）；`nix/addon.nix` 只留
+派生输入（`src`）按 `cleanSourceWith` 收窄到真正被读到的子树：`wind_linux/nix/data.nix` 只留 `data/`、
+`scripts/lib/gen-compat.sh`、`scripts/comment_dicts/`、`wind_input/apps/wind-tools/data/`、`wind_input/data/`（第 3 步的
+`settings/` 源，当前仓库没有该目录，白名单先留着）；`wind_linux/nix/addon.nix` 只留
 `wind_linux/`、`wind_tsf/include/`、单测按 `WIND_PROTOCOL_RS` / `WIND_REPO_DIR` 读的
 `wind_input/crates/{wind-ipc,wind-bridge,wind-ui,wind-keys}/src/` 与
-`wind_macos/Sources/WindInputApp/UI/`；`nix/setting.nix` 见下节。不这么做的话，改一份
+`wind_macos/Sources/WindInputApp/UI/`；`wind_linux/nix/setting.nix` 见下节。不这么做的话，改一份
 `README.md` 也会改掉 `windinput-data` 的输入哈希，级联重建 data → service → fcitx5 → 汇总包。
 **代价**：从仓库新读一个文件就要把它的前缀补进对应白名单，漏了只在这条 Nix 链上失败。
 
 `service.nix` 与 `data.nix` 的 tools 派生没法按子树收窄（要整棵 `wind_input/` 才能跑 cargo），
-但都经 `nix/src-filter.nix` 剔掉 `target/`：`path:` 源下 flake 整棵树（含未跟踪文件）都会被
+但都经 `wind_linux/nix/src-filter.nix` 剔掉 `target/`：`path:` 源下 flake 整棵树（含未跟踪文件）都会被
 复制，本机每跑一次 `cargo build` 就会换一个 store 路径。设置程序的 `wind_input/` 子树同样
 经这个过滤器。
 
 ## 设置程序
 
 `wind-setting` 经 path 依赖引用 `../WindInput/wind_input/crates/{wind-ipc,wind-rpc,wind-config,
-wind-punct,wind-transform}` 与 `../wind-ui-rust`。`nix/setting.nix` 先拼出三仓兄弟布局
+wind-punct,wind-transform}` 与 `../wind-ui-rust`。`wind_linux/nix/setting.nix` 先拼出三仓兄弟布局
 （`WindInput/`、`wind-setting/`、`wind-ui-rust/`），再把 `wind-setting/Cargo.lock` 复制到布局根
 （cargo 的 setup hook 只在源码根找锁文件），构建时 `cd wind-setting`。
 
@@ -98,7 +99,7 @@ wind-punct,wind-transform}` 与 `../wind-ui-rust`。`nix/setting.nix` 先拼出�
 
 服务的二进制里嵌着构建时刻与 git revision（`apps/service/build.rs::emit_build_stamp`）。为让同一
 派生在任意机器上得到同一输出：版本戳取 flake 源的 `lastModified`（git 源是提交时间，`path:` 源是
-源码树 mtime），由 `flake.nix` 传给 `nix/service.nix` 的 `sourceDateEpoch`，后者再设成
+源码树 mtime），由 `flake.nix` 传给 `wind_linux/nix/service.nix` 的 `sourceDateEpoch`，后者再设成
 `SOURCE_DATE_EPOCH`。**stdenv 自带的只是兜底常量 315532800（1980-01-01），不是源码 mtime**——
 不显式传就会恒为 1980；`build.rs` 遇到畸形值（空串 / 非整数）直接构建失败，不退回当前时刻。不设
 该变量时（deb / 本地构建）仍取当前时刻。revision 由 `WIND_GIT_HASH_OVERRIDE` 传入（沙箱里没有
@@ -150,9 +151,12 @@ Fcitx5 的 `FCITX_ADDON_DIRS` / `FCITX_DATA_DIRS`，或自行包一层 `fcitx5-w
 ## 维护
 
 - **升级产品版本**：只改 `docs/VERSION`；flake 直接读该文件。
-- **升级上游词库源**：改 `nix/data.nix` 里的 `*Rev`，构建会报 hash mismatch，把
+- **升级上游词库源**：改 `wind_linux/nix/data.nix` 里的 `*Rev`，构建会报 hash mismatch，把
   `outputHash` 换成报错里的 `got:` 值即可。
 - **升级邻仓**：`nix flake update wind-setting wind-ui-rust`。
+- **裁剪规则**：`scripts/lib/strip-*.awk` 由 `scripts/dev.sh` 与 `wind_linux/nix/data.nix` **共用同一份**，
+  改一处两边同时生效（`dev.ps1` 的 PowerShell 版与 `mac/dev.sh` 仍是各自实现，改规则要同步）。
+- 改动打包文件前先读 `wind_linux/nix/AGENTS.md`：文件职责、立约级不变量、需要同步的位置都在那里。
 - **fcitx5 ABI**：addon 用 nixpkgs 的 fcitx5 头文件构建，`CMakeLists.txt` 会自动探测 C++20
   （新头文件需要），无需人工干预。
 
@@ -199,7 +203,7 @@ Linux 走 `dirs` crate 的 XDG 解析（`wind-config::Config`）：
   是同目录的 `.wind_setting-wrapped`；闭包含 fontconfig，与服务走同一条选字路径。
 - `nix build --rebuild .#windinput-service`：重建同一派生，输出与首次构建逐字节一致。
 - `nix build .#windinput-fcitx5`：14 个纯逻辑单测全部通过；`checkPhase` 另在产物里断言服务与
-  设置程序的 store 前缀（单测在宏未定义时也会过，见 `nix/addon.nix`）；
+  设置程序的 store 前缀（单测在宏未定义时也会过，见 `wind_linux/nix/addon.nix`）；
   addon conf 的 `Version=` 等于 `docs/VERSION`（当前 `0.127.0`），`Category=InputMethod` 在位。
 - `nix build .#windinput`：汇总包布局正确，桌面入口 `Exec` 已指向 store。
 - `nix develop -c cargo --version` 等：devShell 可用。

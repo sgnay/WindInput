@@ -70,7 +70,7 @@ Gatekeeper 拦下时到「系统设置 → 隐私与安全性」放行。
 | `wind_tsf` | C++ | Windows TSF 输入法框架接口，键盘事件捕获 |
 | `wind_macos` | Swift | macOS IMKit 输入法客户端 |
 | `wind_linux` | C++ | Linux Fcitx5 addon（预览版，见 [wind_linux/README.md](wind_linux/README.md)） |
-| `flake.nix` + `nix/` | Nix | Linux 端的 Nix 打包（服务 + addon + 设置程序 + 词库数据，见 [docs/design/nix-packaging.md](docs/design/nix-packaging.md)） |
+| `flake.nix` + `wind_linux/nix/` | Nix | Linux 端的 Nix 打包（服务 + addon + 设置程序 + 词库数据，见 [docs/design/nix-packaging.md](docs/design/nix-packaging.md)） |
 
 发布版安装包还需要以下配套项目，它们在各自的独立仓库中维护：
 

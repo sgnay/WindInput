@@ -27,15 +27,15 @@ symlinkJoin {
   postBuild = ''
     mkdir -p $out/share/applications $out/share/mime/packages $out/share/licenses/windinput
     for f in windinput-setting windinput-import; do
-      install -m644 ${../scripts/linux/pkg}/$f.desktop $out/share/applications/$f.desktop
+      install -m644 ${../../scripts/linux/pkg}/$f.desktop $out/share/applications/$f.desktop
       substituteInPlace $out/share/applications/$f.desktop \
         --replace-fail /usr/lib/windinput/wind_setting ${wind-setting}/lib/windinput/wind_setting
     done
-    install -m644 ${../scripts/linux/pkg}/windinput-mime.xml $out/share/mime/packages/windinput.xml
+    install -m644 ${../../scripts/linux/pkg}/windinput-mime.xml $out/share/mime/packages/windinput.xml
     # 本项目自身许可证（GPL-3.0-or-later）与上游资源声明；rime-emoji 的 LGPL-3.0 正文
     # 随数据分发（data/emoji/），NOTICE.md 只做声明。
-    install -m644 ${../LICENSE} $out/share/licenses/windinput/LICENSE
-    install -m644 ${../NOTICE.md} $out/share/licenses/windinput/NOTICE.md
+    install -m644 ${../../LICENSE} $out/share/licenses/windinput/LICENSE
+    install -m644 ${../../NOTICE.md} $out/share/licenses/windinput/NOTICE.md
   '';
 
   meta = {

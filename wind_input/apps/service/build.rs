@@ -97,13 +97,13 @@ fn main() {
 ///
 /// 两个环境变量让产物可复现（Nix 要求同一派生在任意机器上产出同一结果）：
 /// - `SOURCE_DATE_EPOCH`：存在时取这个 Unix 秒作为版本戳，不设则（deb / 本地构建）取当前时刻。
-///   Nix 侧由 `nix/service.nix` 显式传入 flake 源的 `lastModified`（git 源取提交时间，
+///   Nix 侧由 `wind_linux/nix/service.nix` 显式传入 flake 源的 `lastModified`（git 源取提交时间，
 ///   `path:` 源取源码树 mtime）；stdenv 自带的只是**兜底常量** 315532800（1980-01-01），
 ///   并非源码 mtime。值畸形（空串 / 非整数）直接报错，不悄悄退回当前时刻——否则同一份源码
 ///   两次构建的二进制不同，既上不了 binary cache，也过不了 `nix build --check`，且只在事后
 ///   比对时才暴露。
 /// - `WIND_GIT_HASH_OVERRIDE`：沙箱里没有 `.git`，`git_describe()` 恒为 `unknown`；
-///   Nix 侧把 flake 的 revision 传进来（见 `nix/service.nix`）。
+///   Nix 侧把 flake 的 revision 传进来（见 `wind_linux/nix/service.nix`）。
 fn emit_build_stamp() {
     // 引用一个永不存在的路径 → cargo 视为「已变化」→ 每次 `cargo build` 都重跑本脚本。
     println!("cargo:rerun-if-changed=__wind_build_stamp_force_rerun__");

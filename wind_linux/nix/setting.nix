@@ -31,11 +31,13 @@
 let
   srcFilter = import ./src-filter.nix { inherit lib; };
 
-  # 设置程序用到的两处主仓路径（`scripts/linux/pkg/` 整目录拷：`include_str!` 少一份就编不过，
-  # 整目录可让该目录新增桌面入口时不必回来改这里）。
+  # 设置程序用到的三处主仓路径（`scripts/linux/pkg/` 整目录拷：`include_str!` 少一份就编不过，
+  # 整目录可让该目录新增桌面入口时不必回来改这里；`data/system.comments.toml` 是
+  # `wind-config/comment_lib.rs` 的编译期 `include_str!`）。
   wantedPrefixes = [
     "wind_input"
     "scripts/linux/pkg"
+    "data/system.comments.toml"
   ];
 
   windInputSubset = lib.cleanSourceWith {
@@ -57,9 +59,10 @@ let
     inherit version;
     dontUnpack = true;
     buildCommand = ''
-      mkdir -p $out/WindInput/scripts/linux/pkg
+      mkdir -p $out/WindInput/scripts/linux/pkg $out/WindInput/data
       cp -r ${windInputSubset}/wind_input $out/WindInput/wind_input
       cp ${windInputSubset}/scripts/linux/pkg/* $out/WindInput/scripts/linux/pkg/
+      cp ${windInputSubset}/data/system.comments.toml $out/WindInput/data/system.comments.toml
       cp -r ${windSettingSrc} $out/wind-setting
       cp -r ${windUiRustSrc} $out/wind-ui-rust
       cp ${windSettingSrc}/Cargo.lock $out/Cargo.lock
