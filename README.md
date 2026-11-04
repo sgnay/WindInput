@@ -46,7 +46,9 @@
 - **Linux（预览版）** — `.deb` 安装包（amd64 / arm64，Ubuntu 22.04+、Debian 系发行版），以
   Fcitx5 输入法引擎的形式工作；`sudo apt install ./WindInput-*.deb` 安装后，在「Fcitx5 配置」中
   把清风输入法加入输入法列表。系统输入法框架需为 Fcitx5，KDE Plasma 等桌面的额外设置与已知限制见
-  [wind_linux/README.md](wind_linux/README.md)
+  [wind_linux/README.md](wind_linux/README.md)。Arch 系发行版可用社区维护的 AUR 包
+  [`fcitx5-windinput-bin`](https://aur.archlinux.org/packages/fcitx5-windinput-bin)
+  （**第三方维护，非官方发布**，问题请先向包维护者反馈）
 - **Linux（Nix / NixOS）** — 仓库自带 flake：NixOS 把 `windinput` 包加进
   `i18n.inputMethod.fcitx5.addons`，其它发行版 `nix profile install github:huanfeng/WindInput#windinput`
   后把该包加进 Fcitx5 的 addon 目录。构建产物、用法与限制见
