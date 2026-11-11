@@ -552,16 +552,11 @@ download_dicts() {
     download_file "$EMOJI_BASE/LICENSE"                   "$rime_emoji/LICENSE"                   "LGPL-3.0"
 }
 
-# 随包附带的 rime-frost 细胞词库（上游 cn_dicts_cell/ 下的文件名，组装到 schemas/pinyin/ext/）。
-# 只挑体积小、开了对主库排序几乎无影响的（共约 3.6MB，见 docs/design/schema-dict-discovery.md §8）。
-# ⚠ 与 dev.ps1 的 $FrostCells、mac/dev.sh 的 FROST_CELLS、data/schemas/{pinyin,shuangpin}.schema.toml
-#   里的 cell_* 词库声明同步。
-FROST_CELLS="exthot idiom place history name name2 sport geography animal computer music media industry_product inputmethod chess chess2"
-
-# rime-frost others.txt 里不随包的分组（按分组标题整组剔除）。「著名表演艺术家」是成人影星的
-# 中日文名对照，即便模块默认关也不该进安装包。
-# ⚠ 与 dev.ps1 的 $FrostOthersExclude、mac/dev.sh 的同名变量同步。
-FROST_OTHERS_EXCLUDE="著名表演艺术家"
+# 随包附带的 rime-frost 细胞词库与不随包分组（FROST_CELLS / FROST_OTHERS_EXCLUDE）。
+# 定义抽到 scripts/lib/frost-cells.sh：Nix 打包（wind_linux/nix/data.nix）source 同一份，
+# 免得 Nix 包与 deb/Windows 包的词库构成各写一份、长期漂移。文件头列了仍各有一份的位置。
+# shellcheck source=lib/frost-cells.sh
+. "$SCRIPT_DIR/lib/frost-cells.sh"
 
 # 按分组标题过滤 rime-frost 的 OpenCC 杂项表：$1 源，$2 目标。
 # 规则与标题行的形态见 scripts/lib/strip-frost-sections.awk（Nix 打包共用同一份）。
@@ -979,6 +974,9 @@ Register-ScheduledTask -TaskName 'WindInputDeployBoot' -Action \$a -Force | Out-
 Start-ScheduledTask -TaskName 'WindInputDeployBoot'; Start-Sleep -Seconds 2; \
 Unregister-ScheduledTask -TaskName 'WindInputDeployBoot' -Confirm:\$false" >/dev/null 2>&1 || true
         sleep 2
+        # 计划任务拉起的进程默认 BelowNormal —— WorkBuddy 等前台任务一跑就被排队,
+        # 用户手感是打字卡 50-110ms。每次启动后把优先级抬回 Normal(正式版自启就是 Normal)。
+        remote_ps "Get-Process -Name '$name' -EA SilentlyContinue | ForEach-Object { try { \$_.PriorityClass='Normal' } catch {} }" >/dev/null 2>&1 || true
         # 每行: pid|映像MD5|映像路径。映像已被改名让路的旧进程，Path 指向 .old_*，MD5 对不上。
         out="$(remote_ps "Get-Process -Name '$name' -EA SilentlyContinue | ForEach-Object { \
 \$h=''; try { \$h=(Get-FileHash -Algorithm MD5 -LiteralPath \$_.Path -EA Stop).Hash } catch {}; \

@@ -4,6 +4,8 @@
 #   - 本仓 data/（方案、主题、配置与注释词库源文件）+ scripts/lib/gen-compat.sh（生成 Linux 版
 #     compat.toml）+ scripts/comment_dicts/build.py（中英释义注释词库，第 9 步）
 #     + wind_input/apps/wind-tools/data/（gen_dict 的配置目录）
+#     + scripts/lib/frost-cells.sh 与 scripts/lib/strip-*.awk（与 scripts/dev.sh 共用：
+#       随包细胞词库 / 不随包分组、rime-frost 裁剪规则）
 #   - 上游词库源：固定 commit 的 FOD（见 upstream），只取构建真正用到的文件
 #   - wind-tools 的生成工具：gen_dict / gen_opencc / gen_pinyin / gen_unigram / gen_aux_code
 #
@@ -68,24 +70,8 @@ let
 
   raw = repo: rev: "https://raw.githubusercontent.com/${repo}/${rev}";
 
-  frostCells = [
-    "exthot"
-    "idiom"
-    "place"
-    "history"
-    "name"
-    "name2"
-    "sport"
-    "geography"
-    "animal"
-    "computer"
-    "music"
-    "media"
-    "industry_product"
-    "inputmethod"
-    "chess"
-    "chess2"
-  ];
+  # 随包细胞词库 / 不随包分组：与 scripts/dev.sh 共用同一份定义（见文件头）。
+  frostCells = ../../scripts/lib/frost-cells.sh;
 
   upstream = stdenvNoCC.mkDerivation {
     pname = "windinput-upstream-srcs";
@@ -101,6 +87,9 @@ let
       set -euo pipefail
       mkdir -p $out
 
+      # 细胞词库清单与 scripts/dev.sh 共用（source 后按空格分词遍历）。
+      . ${frostCells}
+
       get() {
         mkdir -p "$(dirname "$2")"
         curl -fsSL --retry 3 --retry-delay 2 -o "$2" "$1"
@@ -112,9 +101,9 @@ let
       for f in 8105 41448 base ext others corrections tencent; do
         get "$frost/cn_dicts/$f.dict.yaml" "$out/rime-frost/cn_dicts/$f.dict.yaml"
       done
-      ${lib.concatMapStringsSep "\n" (c: ''
-        get "$frost/cn_dicts_cell/${c}.dict.yaml" "$out/rime-frost/cn_dicts_cell/${c}.dict.yaml"
-      '') frostCells}
+      for c in $FROST_CELLS; do
+        get "$frost/cn_dicts_cell/$c.dict.yaml" "$out/rime-frost/cn_dicts_cell/$c.dict.yaml"
+      done
       for f in en en_ext; do
         get "$frost/en_dicts/$f.dict.yaml" "$out/rime-frost/en_dicts/$f.dict.yaml"
       done
@@ -200,6 +189,9 @@ stdenv.mkDerivation {
     runHook preBuild
     set -euo pipefail
 
+    # 细胞词库清单与不随包分组：与 scripts/dev.sh 共用同一份（见 data.nix 顶部 `frostCells`）。
+    . ${frostCells}
+
     # 源码树在 store 里是只读的，所有中间产物放到构建目录。
     work=$NIX_BUILD_TOP/work
     rm -rf "$work"
@@ -237,7 +229,7 @@ stdenv.mkDerivation {
     for f in 8105 41448 base ext others corrections; do
       cp -f "$cache/rime-frost/cn_dicts/$f.dict.yaml" "$pinyin/cn_dicts/"
     done
-    for f in ${lib.concatStringsSep " " frostCells}; do
+    for f in $FROST_CELLS; do
       cp -f "$cache/rime-frost/cn_dicts_cell/$f.dict.yaml" "$pinyin/ext/"
     done
     awk -v dir="$pinyin" -f ${../../scripts/lib/strip-unshipped-imports.awk} \
@@ -286,7 +278,7 @@ stdenv.mkDerivation {
 
     # 8b. rime-frost 的 emoji / 符号表
     cp -f "$cache/rime-frost/opencc/emoji.txt" "$data/emoji/frost_emoji.txt"
-    awk -v excl="著名表演艺术家" -f ${../../scripts/lib/strip-frost-sections.awk} \
+    awk -v excl="$FROST_OTHERS_EXCLUDE" -f ${../../scripts/lib/strip-frost-sections.awk} \
       "$cache/rime-frost/opencc/others.txt" > "$data/emoji/frost_others.txt"
 
     # 9. 中英释义注释词库（scripts/comment_dicts/build.py，与 dev.sh 的第 9 步同一件事）。

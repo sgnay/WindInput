@@ -29,6 +29,12 @@ fn main() {
         return;
     }
 
+    // 主线程栈 8 MiB（只是保留地址，按需提交）。默认 1 MiB 在 dev 档（工作区 opt-level=1）下
+    // 不够：主题加载链上 serde 访问器每层都是数百 KiB 的帧，曾因此栈溢出、服务循环崩溃。
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bins=/STACK:8388608");
+    }
+
     // 图标资源（仅 Windows）。
     let icon = product_root.join("wind_tsf/res/wind_input.ico");
     println!("cargo:rerun-if-changed={}", icon.display());
@@ -96,7 +102,8 @@ fn main() {
 /// 强制每次构建重跑，使时间戳与实际二进制构建时刻一致（否则未提交改动重建时戳会滞后）。
 ///
 /// 两个环境变量让产物可复现（Nix 要求同一派生在任意机器上产出同一结果）：
-/// - `SOURCE_DATE_EPOCH`：存在时取这个 Unix 秒作为版本戳，不设则（deb / 本地构建）取当前时刻。
+/// - `SOURCE_DATE_EPOCH`：存在时取这个 Unix 秒作为版本戳，不设则（deb / 本地构建）取当前时刻
+///   ——它本就是 dpkg 等打包环境会自行设置的标准变量，不显式传时由打包器给值。
 ///   Nix 侧由 `wind_linux/nix/service.nix` 显式传入 flake 源的 `lastModified`（git 源取提交时间，
 ///   `path:` 源取源码树 mtime）；stdenv 自带的只是**兜底常量** 315532800（1980-01-01），
 ///   并非源码 mtime。值畸形（空串 / 非整数）直接报错，不悄悄退回当前时刻——否则同一份源码

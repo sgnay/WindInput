@@ -16,6 +16,7 @@
 | `devshell.nix` | cargo / cmake / fcitx5 头文件 / xcb / wayland / gio |
 | `src-filter.nix` | 派生输入的构建产物过滤：把 `target/` 从 `src` 副本里剔掉（service / tools / 设置程序共用） |
 | `../../scripts/lib/strip-*.awk` | rime-frost 裁剪逻辑：与 `scripts/dev.sh` **共用同一份**，这里只引用 |
+| `../../scripts/lib/frost-cells.sh` | 随包细胞词库（`FROST_CELLS`）/ 不随包分组（`FROST_OTHERS_EXCLUDE`）：与 `scripts/dev.sh` **共用同一份**，两个派生里 `source` 后使用 |
 
 ## 立约级不变量（违反即静默故障）
 
@@ -82,9 +83,16 @@
 
 ## 维护
 
-- 升级产品版本：只改 `docs/VERSION`。
-- 升级上游词库源：改 `data.nix` 的 `*Rev`，构建报 hash mismatch 后把 `got:` 填回 `outputHash`。
-- 升级邻仓：`nix flake update wind-setting wind-ui-rust`。
+- 升级产品版本：只改 `docs/VERSION`。**发版时必须同时做下面两条**——Nix 包要可复现，词库源与
+  邻仓都得钉 commit，天然会跟官方包漂开，不跟就是发一个「词库/设置端与同版本 deb、Windows 包
+  不一致」的包。
+- 升级上游词库源：`data.nix` 的 8 个 `*Rev`（frost / pinyin / opencc / wubi / aux / stroke /
+  emoji / hanzi）钉死上游 commit。**每次发版（`docs/VERSION` 变动）时**把它们跟进到当时的上游
+  HEAD，再按构建报的 hash mismatch 把 `got:` 填回对应 `outputHash`；平时不追 master
+  （`dev.sh` 取 master 是开发链，两者口径不同是刻意的）。
+- 升级邻仓：`flake.lock` 里的 `wind-setting` / `wind-ui-rust` 也钉死 commit。**每次发版都要
+  `nix flake update wind-setting wind-ui-rust`**——服务与设置端常配套改协议 / 配置，lock 不跟就会
+  发出设置端与服务对不上的包。
 - 验收基线（改动后至少跑一遍）：`nix build .#windinput`；addon 构建日志应有
   `Wayland 候选窗：启用` 与 14/14 测试通过；裸跑服务应加载 4 个引擎且无 dlopen 警告；
   `wind_setting` 与 `wind_input` 都应是 16 KB 的 wrapper（真实文件是同目录的
@@ -98,13 +106,15 @@
 
 | 改动位置 | 受影响的 Nix 侧 |
 |---|---|
-| `docs/VERSION` | 全部包的版本：`flake.nix` 读它，再注入 `WIND_ADDON_VERSION` / `WIND_APP_VERSION` / `gen_dict --version-date` |
+| `docs/VERSION` | 全部包的版本：`flake.nix` 读它，再注入 `WIND_ADDON_VERSION` / `WIND_APP_VERSION` / `gen_dict --version-date`；**每次发版还要跟 `data.nix` 的 `*Rev` 与 `flake.lock` 邻仓（见「维护」）** |
 | `wind_linux/CMakeLists.txt` 的 `WIND_SERVICE_PATH` / `WIND_SETTING_PATH` / `WIND_ADDON_VERSION` | `addon.nix` 的 `-D` 注入与 `checkPhase` 断言（deb 链共用这三个选项） |
-| `wind_input/apps/service/build.rs` 的 `SOURCE_DATE_EPOCH` / `WIND_GIT_HASH_OVERRIDE` | `service.nix` 的 `env.*`；动了先跑 `nix build --rebuild path:.#windinput-service` |
+| `wind_input/apps/service/build.rs` 的 `SOURCE_DATE_EPOCH` / `WIND_GIT_HASH_OVERRIDE` | `service.nix` 的 `env.*`；动了先跑 `nix build --rebuild path:.#windinput-service`。`SOURCE_DATE_EPOCH` 是 dpkg 等打包环境也会设的标准变量，取不到或值畸形时 build.rs 直接报错 |
 | `scripts/lib/strip-*.awk` | `data.nix` 直接引用同一份（`dev.sh` 也用），改规则两边一起生效 |
+| `scripts/lib/frost-cells.sh` | `data.nix` 的两个派生 source 同一份（`dev.sh` 也用）；`dev.ps1` / `mac/dev.sh` 仍各有一份同名清单，改这里要同步那两处 |
+| `data.nix` 的 `*Rev` / `outputHash` | 上游词库的固定 commit 与 FOD 哈希：`dev.sh` 取 master、Nix 钉 commit，发版时按「维护」跟进 |
 | `scripts/comment_dicts/build.py` / `data/comments-src/` | `data.nix` 第 9 步；词表参数随 dev.sh 的同一步，改 CLI 要三边同步 |
 | `data.nix` 的 `src` 白名单 | 新增「构建期 / 单测从仓库读的文件」要补进去，漏了只在这条链上失败 |
-| 邻仓 `wind-setting` / `wind-ui-rust` | `setting.nix` 的三仓布局与 `Cargo.lock` 放置；升级走 `nix flake update` |
+| 邻仓 `wind-setting` / `wind-ui-rust` | `setting.nix` 的三仓布局与 `Cargo.lock` 放置；**每次发版走 `nix flake update wind-setting wind-ui-rust`** |
 
 ## 已知不在本包范围
 

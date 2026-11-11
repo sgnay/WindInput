@@ -32,7 +32,7 @@ Fcitx5 的 `InputContext`。引擎/词库/候选逻辑全在服务里，这里**
 | `data/icons/hicolor` | 图标成品，CMake 装到 `share/icons`。`windinput`（应用图标）由 `scripts/linux/gen-icons.py` 拆自 wind-setting 的 ico；托盘图标的种子 `windinput-zh` / `-en` / `-caps`（运行时图标还没写出时的降级）由 `wind_input/crates/wind-ui/examples/gen_tray_icons.rs` 生成，与运行时图标同一个 `tray_icon::render`（`host_ui_test` 核对文件齐全）。运行时图标不在这里，在用户的 `$XDG_DATA_HOME/icons/hicolor` |
 | `tests/*_test.cpp` | 纯 C++17 单测（不需要 Fcitx5），与 `wind_tsf/tests` 同风格 |
 | `include/GnomeCaretGeom.h` + `src/core/GnomeCaretGeom.cpp` | GNOME 光标折算的纯函数（桌面名 / 前端名 / scale）。D-Bus 客户端在 `src/fcitx/GnomeCaret.cpp`，只在 Wayland 且有 gio 时编进 addon |
-| `gnome-shell-extension/` | Shell 扩展 `windinput-caret@windinput`（Shell 47–50）。安装说明见该目录 README |
+| `gnome-shell-extension/` | Shell 扩展 `windinput-caret@windinput`（ESM，Shell 45–51）与 `windinput-caret-legacy@windinput`（旧格式，42–44），同一 D-Bus 接口。安装说明见该目录 README |
 
 `src/core` 与 `include` 不依赖 Fcitx5，能单独编、单独测——这条边界别破。
 
@@ -73,8 +73,9 @@ addon 目标的依赖（`WIND_BUILD_ADDON=ON`，默认）：Fcitx5Core / Fcitx5U
 `checkPhase` 就是这么用的）。
 
 设置程序（独立仓 `../wind-setting`）同样能原生 Linux 构建：它依赖的 `windui` 支持
-Windows / macOS / Linux（X11）三个平台（`windui` 的 `platform/mod.rs` 只对其它目标
-`compile_error!`），`wind_linux/nix/setting.nix` 已实测把它编成 Nix 包
+Windows / macOS / Linux 三个平台（`windui` 的 `platform/mod.rs` 只对其它目标
+`compile_error!`；Linux 后端默认 X11，Wayland 桌面经 XWayland，原生 Wayland 后端要
+`WINDUI_BACKEND=wayland` 显式启用），`wind_linux/nix/setting.nix` 已实测把它编成 Nix 包
 （`packages.wind-setting`，见 `wind_linux/nix/AGENTS.md`）。
 
 `e2e.sh` 的做法（改它之前先读脚本头注释）：`dbus-run-session` 起私有会话总线；服务二进制拷进

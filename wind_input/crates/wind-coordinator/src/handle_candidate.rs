@@ -1324,7 +1324,7 @@ impl Coordinator {
         Self::main_path_candidate_limit(
             self.engine_mgr.current_engine_type(),
             input,
-            crate::handle_assoc::use_mobile_overrides(),
+            self.profile.pinyin_single_letter_limit,
         )
     }
 
@@ -1344,16 +1344,17 @@ impl Coordinator {
     pub(crate) fn main_path_candidate_limit(
         engine_type: Option<wind_engine::engine::EngineType>,
         input: &str,
-        mobile: bool,
+        single_letter_limit: Option<usize>,
     ) -> usize {
         let base = Self::initial_candidate_limit_of(engine_type, input);
-        if mobile
-            && engine_type == Some(wind_engine::engine::EngineType::Pinyin)
-            && input.chars().count() == 1
-        {
-            base.min(MOBILE_PINYIN_SINGLE_LIMIT)
-        } else {
-            base
+        match single_letter_limit {
+            Some(limit)
+                if engine_type == Some(wind_engine::engine::EngineType::Pinyin)
+                    && input.chars().count() == 1 =>
+            {
+                base.min(limit)
+            }
+            _ => base,
         }
     }
 
@@ -1492,8 +1493,11 @@ impl Coordinator {
     /// 为什么重码时不展开：成员动辄十几条，整组涌进候选页会把同码的常规候选挤出首页
     /// （`zzbd` 既是标点组又有码表词时，词被淹没）。折叠后组名占一个位置，选了才进组。
     ///
-    /// 「重码」= 另有一条**同码**候选（见 `competes_with_group`），前缀补全、部分消费的
-    /// 拼音候选不算。
+    /// 「重码」= 另有一条**同码精确候选**（见 `competes_with_group`）：码表精确词 / 精确码
+    /// 短语 / 同码的其他精确命令。前缀补全、部分消费候选、以及拼音域的**普通拼音候选**
+    /// （整句、简拼词、简拼回退补条——组码在拼音型方案下天然是简拼形态，泛在重码是无
+    /// 信息量的常态）都不算。组码是用户精心设计的缩写，拼音型方案下恒让位，优先保证
+    /// 短语全码自动展开；码表域的具体同码词冲突（如 `zzbd` 既有标点组又有码表词）仍折叠。
     pub(crate) fn resolve_group_expansion(
         expanded: Option<&(String, String)>,
         input: &str,
@@ -1556,9 +1560,14 @@ impl Coordinator {
         out
     }
 
-    /// 候选是否与「当前输入码的组」构成重码：同码、且整串消费的候选。
-    /// 码表按 `is_exact_code`（精确层）；拼音/混输该标志不齐，改以「非前缀补全 + 消费整串」判，
-    /// 前缀枚举出来的短语导航（组导航、命令导航、静态前缀命中）都不算。
+    /// 候选是否与「当前输入码的组」构成重码：只认**同码精确候选**。
+    /// 码表精确词与精确码短语都标 `is_exact_code`；前缀枚举出来的短语导航（组导航、
+    /// 命令导航、静态前缀命中）、前缀补全不算。
+    ///
+    /// 拼音域（全拼/双拼/混输的拼音侧，`codetable_mode=false`）的**普通拼音候选一律不算
+    /// 竞争**——曾按「非前缀补全 + 消费整串」判，但简拼形态的组码在那套判据下恒有同码
+    /// 简拼词/回退补条（任意声母组合都能组句），折叠变成常态，短语全码自动展开失效。
+    /// 组码是用户精心设计的缩写，恒让位泛化拼音预测，保证命令短语优先使用。
     fn competes_with_group(c: &Candidate, input: &str, codetable_mode: bool) -> bool {
         if c.is_group && c.group_code != input {
             return false;
@@ -1569,10 +1578,7 @@ impl Coordinator {
         if c.is_exact_code {
             return true;
         }
-        if codetable_mode || c.is_prefix || c.is_phrase {
-            return false;
-        }
-        c.consumed_length == 0 || c.consumed_length >= input.len()
+        codetable_mode || c.is_prefix || c.is_phrase
     }
 
     pub(crate) fn build_candidates(
@@ -2059,7 +2065,7 @@ impl Coordinator {
             if via_mixed_pinyin {
                 1
             } else {
-                usize::from(self.rt().config.schema.pinyin.sentence_count)
+                self.active_sentence_count()
             },
         );
         // 纠错候选不占首选（D6）：放在全部重排之后、shadow 之前——用户置顶仍有最终话语权。
@@ -3355,13 +3361,8 @@ impl Coordinator {
     /// 一个 `_of(&schema)` 版本。`separator` 本身也按方案取（见
     /// `EngineManager::pinyin_separator_mode_of`）。
     pub(crate) fn manual_separator_vk_of(&self, schema_id: &str) -> Option<u32> {
-        self.manual_separator_vk_resolve(schema_id, crate::handle_assoc::use_mobile_overrides())
-    }
-
-    /// [`Self::manual_separator_vk_of`] 的实体，`mobile` 显式传入——编译期常量
-    /// `use_mobile_overrides()` 在主机上恒为假，不拆出来就没法在桌面测试里守住移动端那一支。
-    fn manual_separator_vk_resolve(&self, schema_id: &str, mobile: bool) -> Option<u32> {
         use wind_keys::keymap::{VK_BACKTICK, VK_QUOTE};
+        let may_claim_quote = self.profile.separator_may_claim_quote;
         let pinyin_ok = self.engine_mgr.is_pinyin_of(schema_id);
         if !pinyin_ok && !self.engine_mgr.sentence_input_enabled_of(schema_id) {
             return None;
@@ -3377,7 +3378,7 @@ impl Coordinator {
                     Some(VK_QUOTE)
                 } else if free(VK_BACKTICK) {
                     Some(VK_BACKTICK)
-                } else if mobile && !bound(VK_QUOTE) {
+                } else if may_claim_quote && !bound(VK_QUOTE) {
                     Some(VK_QUOTE)
                 } else {
                     None
@@ -3389,15 +3390,8 @@ impl Coordinator {
     /// 活跃方案的手动分隔符字符（`'` 或 `` ` ``），宿主界面据此决定「分词」键发什么；
     /// `None` = 此刻没有分隔符，宿主不该摆分词键。见 [`Self::manual_separator_vk_of`]。
     pub fn manual_separator_char(&self) -> Option<char> {
-        self.manual_separator_char_as(crate::handle_assoc::use_mobile_overrides())
-    }
-
-    /// 同 [`Self::manual_separator_char`]，但**指定按移动端还是桌面**求值。只给测试用：
-    /// 编译期常量在主机上恒为桌面，移动端那一支（`auto` 夺取 `'`）不经它就测不到。
-    #[doc(hidden)]
-    pub fn manual_separator_char_as(&self, mobile: bool) -> Option<char> {
         use wind_keys::keymap::{VK_BACKTICK, VK_QUOTE};
-        match self.manual_separator_vk_resolve(&self.engine_mgr.active_schema_id(), mobile)? {
+        match self.manual_separator_vk_of(&self.engine_mgr.active_schema_id())? {
             VK_QUOTE => Some('\''),
             VK_BACKTICK => Some('`'),
             _ => None,
@@ -3446,11 +3440,13 @@ impl Coordinator {
         // ★ 必须排在 `preedit_split_body.is_empty()` 那道守卫**之前**：码表方案下拼音
         // 拆分形态恒空，守卫会直接 return 原始码，后面的分支一条都走不到。
         // （混输方案下两者可能同时非空 —— 那时正是靠下面各分支按高亮候选各选各的。）
-        if wants_codetable_split(
-            &state.preedit_codetable_body,
-            state.candidates.get(self.highlighted_global_index(state)),
-        ) {
-            return &state.preedit_codetable_body;
+        let highlighted = state.candidates.get(self.highlighted_global_index(state));
+        if wants_codetable_split(&state.preedit_codetable_body, highlighted) {
+            // 整句 N-best：备选的切法与名次 1 往往不同，各条自带切分（`meta.preedit_split`），
+            // 高亮到谁显示谁的；没带的（逆切分）用引擎给的那一份。
+            return highlighted
+                .and_then(|c| c.meta.preedit_split.as_deref())
+                .unwrap_or(&state.preedit_codetable_body);
         }
         // 直接辅助码命中项：`前缀音节 + 空格 + 辅码`，让人看出末尾被当成了辅码。排在
         // 「分段上屏中恒拆分」那条之前：分段后剩余缓冲同样可以带辅码。
@@ -4135,6 +4131,12 @@ impl Coordinator {
     ///
     /// 判据本体在 [`english_text_counts_as_input`]（纯函数，便于单测钉住短语反例）。
     ///
+    /// # 中文方案里的英文候选
+    ///
+    /// 码表 / 拼音主路径里来自英文词库的候选（`source == English`）跟随
+    /// `input.temp_english.commit_space`——与临英、快捷输入同属「中文里插一个英文词」。
+    /// 原码与短语不在此列（下一段的「非英文语境不会误中」仍对它们成立）。
+    ///
     /// ⚠️ 非英文**语境**不会误中：`english_space_enabled_in` 要么要求 `active_is_english()`
     /// （英文方案），要么要求 `state.active == TempEnglish`（临英 overlay），中文语境下两条
     /// 都不成立。（原文写「`english_space_enabled` 已经要求 `active_is_english()`」——
@@ -4157,7 +4159,18 @@ impl Coordinator {
         // `commit_temp_english_selected`，不再经本函数（此前走这里时拿主路的 `input_buffer`
         // 判原码，临英下恒空 ⇒ 原文与变形永不补空格，全角态也不转）。`_in` 仍保留：
         // 别的通用上屏点若在临英语境下调到这里，读的必须是临英那一份开关。
-        english_text_counts_as_input(source, text, input) && self.english_space_enabled_in(state)
+        if english_text_counts_as_input(source, text, input) && self.english_space_enabled_in(state)
+        {
+            return true;
+        }
+        // 中文方案主路径里混进来的英文词库候选（码表 / 拼音的英文候选）：同是「中文里插一个
+        // 英文词」，跟随临英那份开关，与临英、快捷输入一致。只认 `source == English`——原码、
+        // 短语不算；只在主路径（无 overlay）——快捷输入有自己的出口（`mix_english_space`），
+        // 走到这里会补两遍。
+        source == CandidateSource::English
+            && state.active.is_none()
+            && !self.engine_mgr.active_is_english()
+            && self.rt().config.input.temp_english.commit_space
     }
 
     /// 词频记账用的码——**码表与拼音/英文口径不同**，这是两类方案的语义差异。
@@ -4617,8 +4630,8 @@ impl Coordinator {
             }
             "commit_and_input" => {
                 // 触发键字符按标点流水线转换（在提交前取，chinese_punct 等状态不受提交影响）。
-                let piece = self.convert_punct(state, key_char, prev_char);
                 let cand = state.candidates[hi].clone();
+                let piece = self.convert_punct_after(state, key_char, prev_char, &cand.text);
                 // 顶屏类出口：造词 / 6b 跟随 `input.top_commit_learn`。
                 let act = self.commit_selected_learn(
                     state,
@@ -4765,10 +4778,10 @@ impl Coordinator {
                 self.commit_selected(state, &cand, state.selected_index as i32)
             }
             "commit_and_input" => {
-                let piece = key_char
-                    .map(|c| self.convert_punct(state, c, prev_char))
-                    .unwrap_or_default();
                 let cand = state.candidates[hi].clone();
+                let piece = key_char
+                    .map(|c| self.convert_punct_after(state, c, prev_char, &cand.text))
+                    .unwrap_or_default();
                 let act = self.commit_selected(state, &cand, state.selected_index as i32);
                 Self::append_to_insert_text(act, &piece)
             }
@@ -5950,6 +5963,8 @@ impl Coordinator {
             } else {
                 self.commit_selected(&mut state, &cand, page_local as i32)
             };
+            // 点选不经按键出口，中英切换处补空格要在推送之前补（见 `crate::auto_spacing`）。
+            let act = self.apply_auto_spacing(&mut state, act);
             drop(state);
             // commit_selected 已按分支自行 notify_ui_update / notify_ui_hide，此处不再重复。
             self.push_no_key_ctx_action(&act, chinese_mode, true);
@@ -6007,6 +6022,7 @@ impl Coordinator {
                 return None;
             }
         };
+        let act = self.apply_auto_spacing(&mut state, act);
         let chinese_mode = state.chinese_mode;
         drop(state);
         match &act {
@@ -8900,6 +8916,7 @@ mod expand_stop_tests {
             toggles: 0,
             event_seq: 0,
             prev_char: 0,
+            seq_char: 0,
         });
     }
 
@@ -9046,14 +9063,15 @@ mod mobile_limit_tests {
     fn mobile_pinyin_single_letter_is_capped_only_there() {
         let lim = Coordinator::main_path_candidate_limit;
         let py = Some(EngineType::Pinyin);
-        assert_eq!(lim(py, "b", true), super::MOBILE_PINYIN_SINGLE_LIMIT);
+        let mobile = Some(super::MOBILE_PINYIN_SINGLE_LIMIT);
+        assert_eq!(lim(py, "b", mobile), super::MOBILE_PINYIN_SINGLE_LIMIT);
         assert_eq!(
-            lim(py, "b", false),
+            lim(py, "b", None),
             Coordinator::initial_candidate_limit_of(py, "b"),
             "桌面不收紧"
         );
         assert_eq!(
-            lim(py, "bz", true),
+            lim(py, "bz", mobile),
             Coordinator::initial_candidate_limit_of(py, "bz"),
             "两字母起不收紧"
         );
@@ -9063,7 +9081,7 @@ mod mobile_limit_tests {
             EngineType::Mixed,
         ] {
             assert_eq!(
-                lim(Some(other), "t", true),
+                lim(Some(other), "t", mobile),
                 Coordinator::initial_candidate_limit_of(Some(other), "t"),
                 "{other:?} 不受影响（英文 t 曾因上限太小打不出 then）"
             );

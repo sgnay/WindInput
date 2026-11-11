@@ -46,6 +46,8 @@ addon 侧的服务 / 设置程序默认路径是源码里的 `#ifndef` 宏。`wi
    rime-lua-aux-code、rime-stroke、rime-emoji、hanzi-chars）按 **commit 钉版本**，
    由一个固定输出派生（`outputHashMode = "recursive"`）一次性 `curl` 下来。
    只取构建真正用到的文件 —— 不整仓拉取，CLDR 整仓也不需要（emoji 名表已入库）。
+   随包的细胞词库（`cn_dicts_cell/*`）清单与不随包分组取自 `scripts/lib/frost-cells.sh`，
+   与 `scripts/dev.sh` 共用同一份，避免两边的词库构成各写一份、长期漂移。
 2. **生成工具**：`wind-tools` 的 `gen_unigram` / `gen_pinyin` / `gen_opencc` / `gen_dict` /
    `gen_aux_code`，作为独立派生构建后进 `PATH`。
 3. **组装**：复制入库的 `data/`、（目录存在时）合并 `wind_input/data/settings/`、裁剪 rime-frost 的
@@ -102,7 +104,8 @@ wind-punct,wind-transform}` 与 `../wind-ui-rust`。`wind_linux/nix/setting.nix`
 源码树 mtime），由 `flake.nix` 传给 `wind_linux/nix/service.nix` 的 `sourceDateEpoch`，后者再设成
 `SOURCE_DATE_EPOCH`。**stdenv 自带的只是兜底常量 315532800（1980-01-01），不是源码 mtime**——
 不显式传就会恒为 1980；`build.rs` 遇到畸形值（空串 / 非整数）直接构建失败，不退回当前时刻。不设
-该变量时（deb / 本地构建）仍取当前时刻。revision 由 `WIND_GIT_HASH_OVERRIDE` 传入（沙箱里没有
+该变量时（deb / 本地构建）仍取当前时刻——它本来就是 dpkg 等打包环境会自行设置的标准变量，`deb`
+链不传也能拿到打包器给的值。revision 由 `WIND_GIT_HASH_OVERRIDE` 传入（沙箱里没有
 `.git`，否则二进制里恒为 `unknown`）。两个变量都声明了 `cargo:rerun-if-env-changed`，同一个
 `target/` 下改值也会重新执行 build script。动了这两处先跑
 `nix build --rebuild path:.#windinput-service` 确认仍然可复现。
@@ -150,12 +153,20 @@ Fcitx5 的 `FCITX_ADDON_DIRS` / `FCITX_DATA_DIRS`，或自行包一层 `fcitx5-w
 
 ## 维护
 
-- **升级产品版本**：只改 `docs/VERSION`；flake 直接读该文件。
-- **升级上游词库源**：改 `wind_linux/nix/data.nix` 里的 `*Rev`，构建会报 hash mismatch，把
-  `outputHash` 换成报错里的 `got:` 值即可。
-- **升级邻仓**：`nix flake update wind-setting wind-ui-rust`。
-- **裁剪规则**：`scripts/lib/strip-*.awk` 由 `scripts/dev.sh` 与 `wind_linux/nix/data.nix` **共用同一份**，
-  改一处两边同时生效（`dev.ps1` 的 PowerShell 版与 `mac/dev.sh` 仍是各自实现，改规则要同步）。
+- **升级产品版本**：只改 `docs/VERSION`；flake 直接读该文件。Nix 包要可复现，词库源与邻仓都
+  钉死在 commit 上，因此**每次发版（`docs/VERSION` 变动）时还要跟下面两条**，否则会发出一个
+  「词库 / 设置端与同版本 deb、Windows 包不一致」的包。
+- **升级上游词库源**：`wind_linux/nix/data.nix` 的 8 个 `*Rev`（frost / pinyin / opencc / wubi /
+  aux / stroke / emoji / hanzi）钉死上游 commit；发版时把它们跟进到当时的上游 HEAD，构建会报
+  hash mismatch，把对应 `outputHash` 换成报错里的 `got:` 值即可。平时不追 master——`dev.sh`
+  取 master 是开发链，两者口径不同是刻意的。
+- **升级邻仓**：`flake.lock` 里的 `wind-setting` / `wind-ui-rust` 同样钉死；每次发版都要
+  `nix flake update wind-setting wind-ui-rust`（服务与设置端常配套改协议 / 配置，lock 不跟就会
+  发出两者对不上的包）。
+- **裁剪规则与细胞词库清单**：`scripts/lib/strip-*.awk` 与 `scripts/lib/frost-cells.sh`
+  （`FROST_CELLS` / `FROST_OTHERS_EXCLUDE`）由 `scripts/dev.sh` 与 `wind_linux/nix/data.nix`
+  **共用同一份**，改一处两边同时生效（`dev.ps1` 的 PowerShell 版与 `mac/dev.sh` 仍是各自实现，
+  改规则要同步）。
 - 改动打包文件前先读 `wind_linux/nix/AGENTS.md`：文件职责、立约级不变量、需要同步的位置都在那里。
 - **fcitx5 ABI**：addon 用 nixpkgs 的 fcitx5 头文件构建，`CMakeLists.txt` 会自动探测 C++20
   （新头文件需要），无需人工干预。
@@ -204,7 +215,7 @@ Linux 走 `dirs` crate 的 XDG 解析（`wind-config::Config`）：
 - `nix build --rebuild .#windinput-service`：重建同一派生，输出与首次构建逐字节一致。
 - `nix build .#windinput-fcitx5`：14 个纯逻辑单测全部通过；`checkPhase` 另在产物里断言服务与
   设置程序的 store 前缀（单测在宏未定义时也会过，见 `wind_linux/nix/addon.nix`）；
-  addon conf 的 `Version=` 等于 `docs/VERSION`（当前 `0.127.0`），`Category=InputMethod` 在位。
+  addon conf 的 `Version=` 等于 `docs/VERSION`（本次实测时是 `0.127.0`），`Category=InputMethod` 在位。
 - `nix build .#windinput`：汇总包布局正确，桌面入口 `Exec` 已指向 store。
 - `nix develop -c cargo --version` 等：devShell 可用。
 - `nix flake show path:. --all-systems`：5 个包 + `default` + devShell 在 x86_64 / aarch64 下均可求值。
